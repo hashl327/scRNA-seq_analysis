@@ -1,0 +1,100 @@
+---
+title: "TxA23 integration"
+author: "Ashley Hahn"
+date: "2023-04-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(devtools)
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(cowplot)
+```
+
+```{r load all three datasets}
+balb.data <- Read10X(data.dir = "/Users/ashleyhahn/Documents/Internship/BALB/Balb-filtered_feature_bc_matrix")
+three_month.data <- Read10X(data.dir = "/Users/ashleyhahn/Documents/Internship/3-month/3-month-filtered_feature_bc_matrix/")
+sixteen_month.data <- Read10X(data.dir = "/Users/ashleyhahn/Documents/Internship/16-month/16-month-filtered_feature_bc_matrix/")
+```
+
+```{r create Seurat objects}
+balb <- CreateSeuratObject(counts=balb.data, project = "scRNA", min.cells = 5, min.features = 200)
+balb$cond<-"Healthy"
+balb[["percent.mt.balb"]]<-PercentageFeatureSet(balb, pattern="^mt-")
+
+three_month <- CreateSeuratObject(counts=three_month.data, project = "scRNA", min.cells = 5, min.features = 200)
+three_month$cond<-"Young"
+three_month[["percent.mt.three_month"]]<-PercentageFeatureSet(three_month, pattern="^mt-")
+
+sixteen_month <- CreateSeuratObject(counts=sixteen_month.data, project = "scRNA", min.cells = 5, min.features = 200)
+sixteen_month$cond<-"Old"
+sixteen_month[["percent.mt.sixteen_month"]]<-PercentageFeatureSet(sixteen_month, pattern="^mt-")
+```
+
+```{r plot data for each subset; filter outlier cells}
+#balb
+VlnPlot(balb, features=c("nFeature_RNA", "nCount_RNA", "percent.mt.balb"))
+balb<-subset(balb, subset = nFeature_RNA>500 & percent.mt.balb<10 & nCount_RNA<10000)
+head(table(Idents(balb))) #2038
+
+#3-month
+VlnPlot(three_month, features=c("nFeature_RNA", "nCount_RNA", "percent.mt.three_month"))
+three_month<-subset(three_month, subset = nFeature_RNA>500 & percent.mt.three_month<7.5 & nCount_RNA<3500)
+head(table(Idents(three_month))) #3139
+
+#16-month
+VlnPlot(sixteen_month, features=c("nFeature_RNA", "nCount_RNA", "percent.mt.sixteen_month"))
+sixteen_month<-subset(sixteen_month, subset = nFeature_RNA>500 & percent.mt.sixteen_month<10 & nCount_RNA<40000)
+head(table(Idents(sixteen_month))) #7717
+```
+
+```{r create data list}
+Data.list<-c(balb, three_month, sixteen_month)
+Data.list <- lapply(X = Data.list, FUN = function(x) {
+  x <- NormalizeData(x, verbose = FALSE)
+  x <- FindVariableFeatures(x, verbose = FALSE)
+})
+
+features <- SelectIntegrationFeatures(object.list = Data.list)
+
+Data.list <- lapply(X = Data.list, FUN = function(x) {
+  x <- ScaleData(x, features = features, verbose = FALSE)
+  x <- RunPCA(x, features = features, verbose = FALSE)
+})
+
+anchors <- FindIntegrationAnchors(object.list = Data.list, reduction = "rpca")
+integrated <- IntegrateData(anchorset = anchors)
+```
+
+
+```{r data scaling}
+combined<-ScaleData(integrated, verbose=FALSE)
+combined<-RunPCA(combined, verbose=FALSE)
+ElbowPlot(combined, ndims = 50) 
+combined<-RunUMAP(combined, dims=1:30)
+combined<-FindNeighbors(combined, reduction = "pca", dims=1:30)
+combined<-FindClusters(combined, resolution = 0.8)
+combined$cond <- factor(x = combined$cond, levels = c("Healthy","Young", "Old"))
+ 
+p1 <- DimPlot(combined, reduction="umap", split.by="cond", label=TRUE)
+Idents(combined) <- "cond"
+p2 <- DimPlot(combined, reduction="umap", label=TRUE, cols=c("blue","red","green"))
+plot_grid(p1,p2)
+```
+
+```{r save/reload data}
+saveRDS(combined, file="TxA23_scRNA_analysis.rds")
+combined <- readRDS("/Users/ashleyhahn/Documents/Internship/TxA23_scRNA_analysis.rds")
+```
+
+```{r Metaplasia Feature Plot}
+cell_type_marker_gene_list <- list(c("Tff2","Gkn3","Aqp5","Cd44","Muc6","Cblif"))
+
+combined <- AddModuleScore(combined, cell_type_marker_gene_list, ctrl=83,name = "cell_type_score")
+
+FeaturePlot(object = combined, features = "cell_type_score1", split.by="cond",cols=c("gray","green","yellow","orange","red"), pt.size=0.4, label=TRUE)
+```
+
