@@ -4,5 +4,3 @@
   b) bcftools
   c) VarTrix
   d) Seurat -- this is an R package.
-  
-2.
