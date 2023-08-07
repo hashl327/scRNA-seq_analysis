@@ -1,6 +1,0 @@
-1. Gather scRNA-seq data, reference genomes, and download all necessary packages. Tools are largely based in Linux, but you will also need R Studio for clustering analysis.
-  You will need the following software:
-  a) Cellranger (from 10X Genomics)
-  b) bcftools
-  c) VarTrix
-  d) Seurat -- this is an R package.
